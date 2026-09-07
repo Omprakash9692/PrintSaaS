@@ -21,13 +21,43 @@ const __dirname = path.dirname(__filename);
 connectDB();
 
 //middlewares
-const allowedOrigins = process.env.FRONTEND_URL
-  ? [process.env.FRONTEND_URL]
-  : ["http://localhost:5173"];
+
+// Parse allowed origins from env — supports comma-separated values
+// Automatically adds https:// if protocol is missing
+const parseOrigins = (raw) => {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((o) => {
+      o = o.trim().replace(/\/+$/, ""); // strip trailing slashes
+      if (o && !o.startsWith("http")) o = "https://" + o; // ensure protocol
+      return o;
+    })
+    .filter(Boolean);
+};
+
+const allowedOrigins = [
+  ...parseOrigins(process.env.FRONTEND_URL),
+  "http://localhost:5173",
+  "http://localhost:5174",
+];
+
+console.log("✅ CORS allowed origins:", allowedOrigins);
 
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: (incomingOrigin, callback) => {
+      // Allow server-to-server or same-origin requests (no Origin header)
+      if (!incomingOrigin) return callback(null, true);
+
+      const normalized = incomingOrigin.replace(/\/+$/, "");
+      if (allowedOrigins.includes(normalized)) {
+        callback(null, true);
+      } else {
+        console.warn("🚫 CORS blocked origin:", incomingOrigin);
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );

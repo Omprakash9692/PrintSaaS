@@ -28,6 +28,7 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("ALL");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+  const [printingOrderId, setPrintingOrderId] = useState(null);
 
   const fetchOrders = async () => {
     try {
@@ -98,6 +99,7 @@ const Dashboard = () => {
 
   const handlePrint = async (orderId) => {
     try {
+      setPrintingOrderId(orderId);
       const token = localStorage.getItem("token");
 
       const response = await fetch(`${API_URL}/orders/${orderId}/print`, {
@@ -119,9 +121,13 @@ const Dashboard = () => {
 
       iframe.onload = () => {
         iframe.contentWindow.print();
+        // Revoke blob URL after a delay to free memory
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        setPrintingOrderId(null);
       };
     } catch (error) {
       alert(error.message);
+      setPrintingOrderId(null);
     }
   };
 
@@ -389,9 +395,10 @@ const Dashboard = () => {
                         className="btn-primary"
                         style={{ fontSize: "0.875rem", padding: "0.5rem 0.85rem", flex: 1 }}
                         onClick={() => handlePrint(order.orderId)}
+                        disabled={printingOrderId === order.orderId}
                       >
                         <Printer size={15} />
-                        Print Document
+                        {printingOrderId === order.orderId ? "Loading PDF..." : "Print Document"}
                       </button>
 
                       <button
@@ -403,8 +410,27 @@ const Dashboard = () => {
                         <Check size={15} />
                         Complete
                       </button>
+
+                      {printingOrderId === order.orderId && (
+                        <div style={{
+                          width: "100%",
+                          marginTop: "0.35rem",
+                          fontSize: "0.775rem",
+                          color: "var(--printing-text)",
+                          background: "var(--printing-bg)",
+                          border: "1px solid var(--printing-border)",
+                          borderRadius: "var(--radius-sm)",
+                          padding: "0.4rem 0.6rem",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.35rem",
+                        }}>
+                          🖨️ When the dialog opens, select your <strong>physical printer</strong> — not "Save as PDF"
+                        </div>
+                      )}
                     </>
                   )}
+
 
                   {order.status === "COMPLETED" && (
                     <div

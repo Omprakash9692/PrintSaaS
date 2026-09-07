@@ -1,11 +1,14 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import API_URL from "../services/api";
 import Navbar from "../components/Navbar";
 import { Check, Mail, Lock, LogIn, ShieldCheck, FileCheck, Layers } from "lucide-react";
 
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const justRegistered = location.state?.registered;
+  const registeredShopName = location.state?.shopName;
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -116,7 +119,28 @@ const Login = () => {
                 </p>
               </div>
 
+              {/* Success banner after registration */}
+              {justRegistered && (
+                <div
+                  style={{
+                    background: "var(--completed-bg)",
+                    border: "1px solid var(--completed-border)",
+                    color: "var(--completed-text)",
+                    padding: "0.75rem 1rem",
+                    borderRadius: "var(--radius-sm)",
+                    fontSize: "0.875rem",
+                    marginBottom: "1.25rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                  }}
+                >
+                  🎉 <strong>{registeredShopName || "Your shop"}</strong> registered successfully! Please log in.
+                </div>
+              )}
+
               <form onSubmit={handleSubmit}>
+
                 <div className="form-group">
                   <label className="form-label" htmlFor="login-email">
                     Email Address
@@ -190,12 +214,33 @@ const Login = () => {
                   marginTop: "1.75rem",
                   paddingTop: "1.25rem",
                   borderTop: "1px solid var(--border-color)",
-                  fontSize: "0.8rem",
+                  fontSize: "0.875rem",
                   color: "var(--text-muted)",
                   textAlign: "center",
                 }}
               >
                 🔒 Protected by 256-bit encrypted session security
+              </div>
+
+              <div
+                style={{
+                  marginTop: "1rem",
+                  fontSize: "0.875rem",
+                  color: "var(--text-muted)",
+                  textAlign: "center",
+                }}
+              >
+                Don't have a shop yet?{" "}
+                <Link
+                  to="/register"
+                  style={{
+                    color: "var(--primary)",
+                    fontWeight: "600",
+                    textDecoration: "none",
+                  }}
+                >
+                  Register here →
+                </Link>
               </div>
             </div>
           </div>

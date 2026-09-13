@@ -1,0 +1,4 @@
+.env
+temp/
+printed_jobs/
+node_modules/

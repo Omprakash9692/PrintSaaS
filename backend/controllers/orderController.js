@@ -2,6 +2,8 @@ import Order from "../models/Order.js";
 import User from "../models/User.js";
 import crypto from "crypto";
 import fs from "fs";
+import path from "path";
+import { uploadToCloudinary, isCloudinaryConfigured } from "../config/cloudinary.js";
 
 export const createOrder = async (req, res) => {
   try {
@@ -44,7 +46,6 @@ export const createOrder = async (req, res) => {
     }
 
     // check file
-
     if (!req.file) {
       return res.status(400).json({
         message: "PDF file is required",
@@ -64,6 +65,36 @@ export const createOrder = async (req, res) => {
       });
     }
 
+    // Handle File Storage (Cloudinary attempt with automatic Local Disk Fallback)
+    let cloudinaryResult = null;
+    let localFilePath = req.file.path || null;
+
+    if (req.file.buffer) {
+      if (isCloudinaryConfigured()) {
+        try {
+          cloudinaryResult = await uploadToCloudinary(
+            req.file.buffer,
+            req.file.originalname
+          );
+        } catch (uploadError) {
+          console.warn("⚠️ Cloudinary upload failed (403 restriction or error). Falling back to local storage:", uploadError.message);
+        }
+      }
+
+      // If Cloudinary is not configured OR if Cloudinary upload failed, save locally
+      if (!cloudinaryResult) {
+        const uploadsDir = path.join(process.cwd(), "uploads");
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+        const uniqueFilename = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
+        const fullLocalPath = path.join(uploadsDir, uniqueFilename);
+        fs.writeFileSync(fullLocalPath, req.file.buffer);
+        localFilePath = path.join("uploads", uniqueFilename);
+        console.log(`📁 Order document saved locally to: ${localFilePath}`);
+      }
+    }
+
     // Generate human-friendly order ID
     const orderId =
       "ORD-" + crypto.randomBytes(3).toString("hex").toUpperCase();
@@ -74,7 +105,9 @@ export const createOrder = async (req, res) => {
       shopCode: shop.shopCode,
       document: {
         filename: req.file.originalname,
-        path: req.file.path,
+        path: localFilePath,
+        url: cloudinaryResult ? cloudinaryResult.secure_url : null,
+        publicId: cloudinaryResult ? cloudinaryResult.public_id : null,
         size: req.file.size,
       },
       copies: numberOfCopies,

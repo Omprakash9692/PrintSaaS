@@ -22,7 +22,17 @@ const orderSchema = new mongoose.Schema(
 
             path: {
                 type: String,
-                required: null
+                default: null
+            },
+
+            url: {
+                type: String,
+                default: null
+            },
+
+            publicId: {
+                type: String,
+                default: null
             },
 
             size: {
@@ -61,7 +71,8 @@ const orderSchema = new mongoose.Schema(
                 "PENDING",
                 "PRINTING",
                 "COMPLETED",
-                "CANCELLED"
+                "CANCELLED",
+                "PRINT_FAILED"
             ],
             default: "PENDING"
         },

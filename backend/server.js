@@ -8,6 +8,7 @@ import authRoutes from "./routes/authRoutes.js";
 import shopRoutes from "./routes/shopRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import { cleanupOldOrders } from "./utils/cleanupOrders.js";
+import agentRoutes from "./routes/agentRoutes.js";
 
 dotenv.config();
 
@@ -70,6 +71,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/auth", authRoutes);
 app.use("/api/shops", shopRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/agents", agentRoutes);
 
 app.get("/", (req,res)=>{
     res.send("API is running...");

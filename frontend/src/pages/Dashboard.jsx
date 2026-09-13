@@ -25,10 +25,14 @@ import {
 const Dashboard = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [agentStatus, setAgentStatus] = useState(null);
   const [activeTab, setActiveTab] = useState("ALL");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [printingOrderId, setPrintingOrderId] = useState(null);
+  const [agent, setAgent] = useState(null);
+  const [agentToken, setAgentToken] = useState(null);
+  const [registeringAgent, setRegisteringAgent] = useState(false);
 
   const fetchOrders = async () => {
     try {
@@ -54,11 +58,74 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchOrders();
+    fetchAgentStatus();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchAgentStatus();
+    }, 10000);
+
+    return () => {
+      clearInterval(interval);
+    };
   }, []);
 
   const handleManualRefresh = () => {
     setIsRefreshing(true);
     fetchOrders();
+    fetchAgentStatus();
+  };
+
+  const registerPrintAgent = async () => {
+    try {
+      setRegisteringAgent(true);
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/agents/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: "Main Shop Computer",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to register agent");
+      }
+      setAgent(data.agent);
+      setAgentToken(data.token);
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setRegisteringAgent(false);
+    }
+  };
+  const fetchAgentStatus = async () => {
+    try {
+      const token = localStorage.getItem("token");
+
+      const response = await fetch(`${API_URL}/agents/status`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setAgentStatus(null);
+        return;
+      }
+      setAgentStatus(data.agent);
+    } catch (error) {
+      console.error("Failed to fetch agent status:", error);
+      setAgentStatus(null);
+    }
   };
 
   const updateStatus = async (orderId, status) => {
@@ -85,12 +152,12 @@ const Dashboard = () => {
         previousOrders.map((order) =>
           order.orderId === orderId
             ? {
-              ...order,
-              ...data.order,
-              document: data.order.document || order.document,
-            }
-            : order
-        )
+                ...order,
+                ...data.order,
+                document: data.order.document || order.document,
+              }
+            : order,
+        ),
       );
     } catch (error) {
       alert(error.message);
@@ -109,7 +176,9 @@ const Dashboard = () => {
       });
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.message || "Failed to download document for printing");
+        throw new Error(
+          data.message || "Failed to download document for printing",
+        );
       }
 
       const blob = await response.blob();
@@ -151,20 +220,34 @@ const Dashboard = () => {
         <Navbar showLogout={true} onLogout={handleLogout} />
         <main className="main-content">
           <div className="saas-card empty-state">
-            <div className="empty-state-icon" style={{ animation: "pulse 1.5s infinite" }}>
+            <div
+              className="empty-state-icon"
+              style={{ animation: "pulse 1.5s infinite" }}
+            >
               <RefreshCw size={28} />
             </div>
             <h3 className="empty-state-title">Loading dashboard orders...</h3>
-            <p className="empty-state-subtitle">Fetching incoming customer documents</p>
+            <p className="empty-state-subtitle">
+              Fetching incoming customer documents
+            </p>
           </div>
         </main>
       </div>
     );
   }
 
-  const pendingCount = orders.filter((order) => order.status === "PENDING").length;
-  const printingCount = orders.filter((order) => order.status === "PRINTING").length;
-  const completedCount = orders.filter((order) => order.status === "COMPLETED").length;
+  const pendingCount = orders.filter(
+    (order) => order.status === "PENDING",
+  ).length;
+  const printingCount = orders.filter(
+    (order) => order.status === "PRINTING",
+  ).length;
+  const completedCount = orders.filter(
+    (order) => order.status === "COMPLETED",
+  ).length;
+  const failedCount = orders.filter(
+    (order) => order.status === "PRINT_FAILED",
+  ).length;
 
   const filteredOrders = orders.filter((order) => {
     if (activeTab === "ALL") return true;
@@ -185,9 +268,42 @@ const Dashboard = () => {
           <div className="dashboard-title-group">
             <h1>{storedShopName} Dashboard</h1>
             <p>
-              Shop Code: <strong style={{ color: "var(--primary)", fontFamily: "monospace", fontSize: "1rem" }}>{storedShopCode || "N/A"}</strong> | Manage print queue & print files securely.
+              Shop Code:{" "}
+              <strong
+                style={{
+                  color: "var(--primary)",
+                  fontFamily: "monospace",
+                  fontSize: "1rem",
+                }}
+              >
+                {storedShopCode || "N/A"}
+              </strong>{" "}
+              | Manage print queue & print files securely.
             </p>
           </div>
+
+          {agentStatus && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                padding: "0.5rem 0.75rem",
+                borderRadius: "var(--radius-sm)",
+                background: agentStatus.online
+                  ? "var(--completed-bg)"
+                  : "var(--printing-bg)",
+                fontSize: "0.8rem",
+                fontWeight: "600",
+              }}
+            >
+              <span>{agentStatus.online ? "🟢" : "🔴"}</span>
+
+              <span>
+                Print Agent {agentStatus.online ? "Online" : "Offline"}
+              </span>
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <button
@@ -207,11 +323,58 @@ const Dashboard = () => {
               disabled={isRefreshing}
               style={{ fontSize: "0.875rem" }}
             >
-              <RefreshCw size={15} className={isRefreshing ? "spin-icon" : ""} />
+              <RefreshCw
+                size={15}
+                className={isRefreshing ? "spin-icon" : ""}
+              />
               {isRefreshing ? "Refreshing..." : "Refresh Queue"}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={registerPrintAgent}
+              disabled={registeringAgent}
+            >
+              {registeringAgent ? "Connecting..." : "Connect Print Agent"}
             </button>
           </div>
         </div>
+
+        {agentToken && (
+          <div
+            className="saas-card"
+            style={{
+              marginBottom: "1.5rem",
+              padding: "1rem 1.25rem",
+            }}
+          >
+            <h3>Print Agent Token</h3>
+
+            <p
+              style={{
+                fontSize: "0.85rem",
+                color: "var(--text-muted)",
+                marginBottom: "0.75rem",
+              }}
+            >
+              Copy this token to the Print Agent computer and add it to the
+              agent's .env file.
+            </p>
+
+            <code
+              style={{
+                display: "block",
+                padding: "0.75rem",
+                background: "var(--bg-secondary)",
+                borderRadius: "var(--radius-sm)",
+                wordBreak: "break-all",
+                fontSize: "0.8rem",
+              }}
+            >
+              {agentToken}
+            </code>
+          </div>
+        )}
 
         {/* Metric / Summary Cards */}
         <div className="summary-cards-grid">
@@ -247,6 +410,17 @@ const Dashboard = () => {
 
           <div className="metric-card">
             <div className="metric-info">
+              <p>Print Failed</p>
+              <div className="metric-value">{failedCount}</div>
+            </div>
+
+            <div className="metric-icon-box failed">
+              <X size={22} />
+            </div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-info">
               <p>Total Orders</p>
               <div className="metric-value">{orders.length}</div>
             </div>
@@ -258,7 +432,14 @@ const Dashboard = () => {
 
         {/* Filter Navigation Bar */}
         <div style={{ marginBottom: "1.5rem" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "0.75rem",
+            }}
+          >
             <h3 style={{ fontSize: "1.15rem" }}>Orders Queue</h3>
             <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
               Showing {filteredOrders.length} of {orders.length} orders
@@ -290,6 +471,12 @@ const Dashboard = () => {
             >
               Completed ({completedCount})
             </button>
+            <button
+              className={`filter-tab ${activeTab === "PRINT_FAILED" ? "active" : ""}`}
+              onClick={() => setActiveTab("PRINT_FAILED")}
+            >
+              Print Failed ({failedCount})
+            </button>
           </div>
         </div>
 
@@ -300,10 +487,13 @@ const Dashboard = () => {
               <Inbox size={32} />
             </div>
             <h3 className="empty-state-title">
-              {activeTab === "ALL" ? "No orders yet" : `No ${activeTab.toLowerCase()} orders`}
+              {activeTab === "ALL"
+                ? "No orders yet"
+                : `No ${activeTab.toLowerCase()} orders`}
             </h3>
             <p className="empty-state-subtitle">
-              New customer print orders will appear here automatically when uploaded.
+              New customer print orders will appear here automatically when
+              uploaded.
             </p>
           </div>
         ) : (
@@ -311,12 +501,13 @@ const Dashboard = () => {
             {filteredOrders.map((order) => (
               <div
                 key={order.orderId}
-                className={`order-card ${order.status === "PENDING"
+                className={`order-card ${
+                  order.status === "PENDING"
                     ? "pending-card"
                     : order.status === "PRINTING"
                       ? "printing-card"
                       : "completed-card"
-                  }`}
+                }`}
               >
                 <div>
                   {/* Order Card Header */}
@@ -340,7 +531,12 @@ const Dashboard = () => {
                       >
                         {order.document?.filename || "document.pdf"}
                       </div>
-                      <div style={{ fontSize: "0.775rem", color: "var(--text-muted)" }}>
+                      <div
+                        style={{
+                          fontSize: "0.775rem",
+                          color: "var(--text-muted)",
+                        }}
+                      >
                         PDF Document
                       </div>
                     </div>
@@ -355,19 +551,28 @@ const Dashboard = () => {
                     </div>
 
                     <div className="spec-item">
-                      <FileSpreadsheet size={14} style={{ color: "var(--text-muted)" }} />
+                      <FileSpreadsheet
+                        size={14}
+                        style={{ color: "var(--text-muted)" }}
+                      />
                       <span>Color:</span>
                       <span className="spec-value">{order.colorMode}</span>
                     </div>
 
                     <div className="spec-item">
-                      <Layers size={14} style={{ color: "var(--text-muted)" }} />
+                      <Layers
+                        size={14}
+                        style={{ color: "var(--text-muted)" }}
+                      />
                       <span>Sides:</span>
                       <span className="spec-value">{order.sides}</span>
                     </div>
 
                     <div className="spec-item">
-                      <FileText size={14} style={{ color: "var(--text-muted)" }} />
+                      <FileText
+                        size={14}
+                        style={{ color: "var(--text-muted)" }}
+                      />
                       <span>Paper:</span>
                       <span className="spec-value">{order.paperSize}</span>
                     </div>
@@ -393,18 +598,27 @@ const Dashboard = () => {
                       <button
                         type="button"
                         className="btn-primary"
-                        style={{ fontSize: "0.875rem", padding: "0.5rem 0.85rem", flex: 1 }}
+                        style={{
+                          fontSize: "0.875rem",
+                          padding: "0.5rem 0.85rem",
+                          flex: 1,
+                        }}
                         onClick={() => handlePrint(order.orderId)}
                         disabled={printingOrderId === order.orderId}
                       >
                         <Printer size={15} />
-                        {printingOrderId === order.orderId ? "Loading PDF..." : "Print Document"}
+                        {printingOrderId === order.orderId
+                          ? "Loading PDF..."
+                          : "Print Document"}
                       </button>
 
                       <button
                         type="button"
                         className="btn-success"
-                        style={{ fontSize: "0.875rem", padding: "0.5rem 0.85rem" }}
+                        style={{
+                          fontSize: "0.875rem",
+                          padding: "0.5rem 0.85rem",
+                        }}
                         onClick={() => updateStatus(order.orderId, "COMPLETED")}
                       >
                         <Check size={15} />
@@ -412,25 +626,41 @@ const Dashboard = () => {
                       </button>
 
                       {printingOrderId === order.orderId && (
-                        <div style={{
-                          width: "100%",
-                          marginTop: "0.35rem",
-                          fontSize: "0.775rem",
-                          color: "var(--printing-text)",
-                          background: "var(--printing-bg)",
-                          border: "1px solid var(--printing-border)",
-                          borderRadius: "var(--radius-sm)",
-                          padding: "0.4rem 0.6rem",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.35rem",
-                        }}>
-                          🖨️ When the dialog opens, select your <strong>physical printer</strong> — not "Save as PDF"
+                        <div
+                          style={{
+                            width: "100%",
+                            marginTop: "0.35rem",
+                            fontSize: "0.775rem",
+                            color: "var(--printing-text)",
+                            background: "var(--printing-bg)",
+                            border: "1px solid var(--printing-border)",
+                            borderRadius: "var(--radius-sm)",
+                            padding: "0.4rem 0.6rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.35rem",
+                          }}
+                        >
+                          🖨️ When the dialog opens, select your{" "}
+                          <strong>physical printer</strong> — not "Save as PDF"
                         </div>
                       )}
                     </>
                   )}
-
+                  {order.status === "PRINT_FAILED" && (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      style={{
+                        fontSize: "0.875rem",
+                        padding: "0.5rem 1rem",
+                      }}
+                      onClick={() => updateStatus(order.orderId, "PENDING")}
+                    >
+                      <RefreshCw size={15} />
+                      Retry Print
+                    </button>
+                  )}
 
                   {order.status === "COMPLETED" && (
                     <div
@@ -463,8 +693,17 @@ const Dashboard = () => {
       {/* Shop Counter QR Poster Modal */}
       {isQRModalOpen && (
         <div className="modal-backdrop">
-          <div className="saas-card modal-content" style={{ maxWidth: "420px", textAlign: "center", padding: "2rem" }}>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.5rem" }}>
+          <div
+            className="saas-card modal-content"
+            style={{ maxWidth: "420px", textAlign: "center", padding: "2rem" }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                marginBottom: "0.5rem",
+              }}
+            >
               <button
                 type="button"
                 className="btn-secondary"
@@ -476,12 +715,22 @@ const Dashboard = () => {
             </div>
 
             <div style={{ marginBottom: "1.25rem" }}>
-              <div className="shop-avatar-icon" style={{ width: "48px", height: "48px", marginBottom: "0.5rem" }}>
+              <div
+                className="shop-avatar-icon"
+                style={{
+                  width: "48px",
+                  height: "48px",
+                  marginBottom: "0.5rem",
+                }}
+              >
                 <Store size={22} />
               </div>
-              <h2 style={{ fontSize: "1.35rem", marginBottom: "0.25rem" }}>Print Shop Counter QR</h2>
+              <h2 style={{ fontSize: "1.35rem", marginBottom: "0.25rem" }}>
+                Print Shop Counter QR
+              </h2>
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Display or print this QR code at your shop counter for customers to scan.
+                Display or print this QR code at your shop counter for customers
+                to scan.
               </p>
             </div>
 
@@ -500,13 +749,37 @@ const Dashboard = () => {
             </div>
 
             <div style={{ marginBottom: "1.25rem" }}>
-              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: "700" }}>
+              <div
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--text-muted)",
+                  marginBottom: "0.25rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  fontWeight: "700",
+                }}
+              >
                 Shop Code (encoded in QR)
               </div>
-              <div style={{ fontSize: "1rem", fontWeight: "800", color: "var(--primary)", fontFamily: "monospace", letterSpacing: "0.1em" }}>
+              <div
+                style={{
+                  fontSize: "1rem",
+                  fontWeight: "800",
+                  color: "var(--primary)",
+                  fontFamily: "monospace",
+                  letterSpacing: "0.1em",
+                }}
+              >
                 {storedShopCode || "—"}
               </div>
-              <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "0.35rem", wordBreak: "break-all" }}>
+              <div
+                style={{
+                  fontSize: "0.78rem",
+                  color: "var(--text-muted)",
+                  marginTop: "0.35rem",
+                  wordBreak: "break-all",
+                }}
+              >
                 {shopURL}
               </div>
             </div>

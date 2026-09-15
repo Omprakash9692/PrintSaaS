@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const config = {
-    apiUrl: process.env.API_URL,
+    apiUrl: process.env.API_URL || "http://localhost:5000/api",
     agentToken: process.env.AGENT_TOKEN,
     pollInterval: Number(
         process.env.POLL_INTERVAL || 5000
@@ -11,12 +11,6 @@ const config = {
     printerMode: (process.env.PRINTER_MODE || "mock").toLowerCase(), // "mock" | "virtual" | "real"
     printerName: process.env.PRINTER_NAME || null,
 };
-
-if (!config.apiUrl) {
-    throw new Error(
-        "API_URL is missing in .env"
-    );
-}
 
 if (!config.agentToken) {
     throw new Error(

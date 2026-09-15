@@ -4,7 +4,7 @@ import https from "https";
 import PrintAgent from "../models/PrintAgent.js";
 import Order from "../models/Order.js";
 import fs from "fs";
-import { deleteFromCloudinary } from "../config/cloudinary.js";
+import { deleteFromImageKit } from "../config/imagekit.js";
 
 export const registerAgent = async (req, res) => {
     try {
@@ -16,18 +16,6 @@ export const registerAgent = async (req, res) => {
             });
         }
 
-        // Check if this shop already has an active agent
-        const existingAgent = await PrintAgent.findOne({
-            shopCode: req.user.shopCode,
-            active: true
-        });
-
-        if (existingAgent) {
-            return res.status(400).json({
-                message: "A print agent is already connected to this shop"
-            });
-        }
-
         // Generate secure agent token
         const rawToken = crypto.randomBytes(32).toString("hex");
 
@@ -36,11 +24,23 @@ export const registerAgent = async (req, res) => {
             .update(rawToken)
             .digest("hex");
 
-        const agent = await PrintAgent.create({
-            shopCode: req.user.shopCode,
-            name,
-            tokenHash
+        // Check if this shop already has an agent (update token if so)
+        let agent = await PrintAgent.findOne({
+            shopCode: req.user.shopCode
         });
+
+        if (agent) {
+            agent.tokenHash = tokenHash;
+            agent.active = true;
+            agent.name = name || agent.name;
+            await agent.save();
+        } else {
+            agent = await PrintAgent.create({
+                shopCode: req.user.shopCode,
+                name,
+                tokenHash
+            });
+        }
 
         res.status(201).json({
             message: "Print agent registered",
@@ -124,12 +124,12 @@ export const getAgentJobDocument = async (req, res) => {
         res.setHeader("Expires", "0");
         res.setHeader("Content-Type", "application/pdf");
 
-        // 1. If stored in Cloudinary
+        // 1. If stored in ImageKit / Cloud storage
         if (order.document?.url) {
             https.get(order.document.url, (stream) => {
                 stream.pipe(res);
             }).on("error", (err) => {
-                console.error("Cloudinary Stream Error:", err);
+                console.error("Cloud Storage Stream Error:", err);
                 res.status(500).json({ message: "Failed to stream document from Cloud storage" });
             });
             return;
@@ -192,9 +192,9 @@ export const updateAgentJobStatus = async (req, res) => {
         }
 
         if (status === "PRINTING") {
-            if (order.status !== "PENDING") {
+            if (order.status !== "PENDING" && order.status !== "PRINT_FAILED") {
                 return res.status(400).json({
-                    message: "Order is not pending"
+                    message: "Order is not pending or failed"
                 });
             }
 
@@ -211,9 +211,11 @@ export const updateAgentJobStatus = async (req, res) => {
             order.status = "COMPLETED";
             order.completedAt = new Date();
 
-            // Delete document from Cloudinary if stored in cloud
-            if (order.document?.publicId) {
-                await deleteFromCloudinary(order.document.publicId);
+            // Delete document from ImageKit if stored in cloud
+            const cloudFileId = order.document?.fileId || order.document?.publicId;
+            if (cloudFileId) {
+                await deleteFromImageKit(cloudFileId);
+                order.document.fileId = null;
                 order.document.publicId = null;
                 order.document.url = null;
             }

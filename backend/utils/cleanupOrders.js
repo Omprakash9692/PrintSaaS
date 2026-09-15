@@ -1,6 +1,6 @@
 import fs from "fs";
 import Order from "../models/Order.js";
-import { deleteFromCloudinary } from "../config/cloudinary.js";
+import { deleteFromImageKit } from "../config/imagekit.js";
 
 export const cleanupOldOrders = async () => {
   try {
@@ -12,9 +12,11 @@ export const cleanupOldOrders = async () => {
     });
 
     for (const order of oldOrders) {
-      // Clean up Cloudinary asset
-      if (order.document?.publicId) {
-        await deleteFromCloudinary(order.document.publicId);
+      // Clean up ImageKit asset
+      const cloudFileId = order.document?.fileId || order.document?.publicId;
+      if (cloudFileId) {
+        await deleteFromImageKit(cloudFileId);
+        order.document.fileId = null;
         order.document.publicId = null;
         order.document.url = null;
       }

@@ -35,6 +35,11 @@ const orderSchema = new mongoose.Schema(
                 default: null
             },
 
+            fileId: {
+                type: String,
+                default: null
+            },
+
             size: {
                 type: Number,
                 required: true

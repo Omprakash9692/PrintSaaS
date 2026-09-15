@@ -3,7 +3,7 @@ import User from "../models/User.js";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import { uploadToCloudinary, isCloudinaryConfigured } from "../config/cloudinary.js";
+import { uploadToImageKit, isImageKitConfigured } from "../config/imagekit.js";
 
 export const createOrder = async (req, res) => {
   try {
@@ -65,24 +65,24 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    // Handle File Storage (Cloudinary attempt with automatic Local Disk Fallback)
-    let cloudinaryResult = null;
+    // Handle File Storage (ImageKit attempt with automatic Local Disk Fallback)
+    let imagekitResult = null;
     let localFilePath = req.file.path || null;
 
     if (req.file.buffer) {
-      if (isCloudinaryConfigured()) {
+      if (isImageKitConfigured()) {
         try {
-          cloudinaryResult = await uploadToCloudinary(
+          imagekitResult = await uploadToImageKit(
             req.file.buffer,
             req.file.originalname
           );
         } catch (uploadError) {
-          console.warn("⚠️ Cloudinary upload failed (403 restriction or error). Falling back to local storage:", uploadError.message);
+          console.warn("⚠️ ImageKit upload failed. Falling back to local storage:", uploadError.message);
         }
       }
 
-      // If Cloudinary is not configured OR if Cloudinary upload failed, save locally
-      if (!cloudinaryResult) {
+      // If ImageKit is not configured OR if ImageKit upload failed, save locally
+      if (!imagekitResult) {
         const uploadsDir = path.join(process.cwd(), "uploads");
         if (!fs.existsSync(uploadsDir)) {
           fs.mkdirSync(uploadsDir, { recursive: true });
@@ -106,8 +106,9 @@ export const createOrder = async (req, res) => {
       document: {
         filename: req.file.originalname,
         path: localFilePath,
-        url: cloudinaryResult ? cloudinaryResult.secure_url : null,
-        publicId: cloudinaryResult ? cloudinaryResult.public_id : null,
+        url: imagekitResult ? imagekitResult.url : null,
+        fileId: imagekitResult ? imagekitResult.fileId : null,
+        publicId: imagekitResult ? imagekitResult.fileId : null,
         size: req.file.size,
       },
       copies: numberOfCopies,
@@ -175,7 +176,13 @@ export const updateOrderStatus = async (req, res) => {
     const { orderId } = req.params;
     const { status } = req.body;
 
-    const allowedStatuses = ["PENDING", "PRINTING", "COMPLETED", "CANCELLED"];
+    const allowedStatuses = [
+      "PENDING",
+      "PRINTING",
+      "COMPLETED",
+      "PRINT_FAILED",
+      "CANCELLED",
+    ];
 
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
@@ -195,13 +202,14 @@ export const updateOrderStatus = async (req, res) => {
     }
 
     const validTransitions = {
-      PENDING: ["PRINTING", "CANCELLED"],
-      PRINTING: ["COMPLETED"],
+      PENDING: ["PRINTING", "CANCELLED", "PRINT_FAILED"],
+      PRINTING: ["COMPLETED", "PRINT_FAILED", "PENDING"],
+      PRINT_FAILED: ["PENDING", "PRINTING", "CANCELLED"],
       COMPLETED: [],
       CANCELLED: [],
     };
 
-    if (!validTransitions[order.status].includes(status)) {
+    if (!validTransitions[order.status]?.includes(status)) {
       return res.status(400).json({
         message: `Cannot change order from ${order.status} to ${status}`,
       });
@@ -213,8 +221,9 @@ export const updateOrderStatus = async (req, res) => {
       order.completedAt = new Date();
 
       if (order.document?.path) {
-        if (fs.existsSync(order.document.path)) {
-          fs.unlinkSync(order.document.path);
+        const absoluteDocPath = path.resolve(process.cwd(), order.document.path);
+        if (fs.existsSync(absoluteDocPath)) {
+          fs.unlinkSync(absoluteDocPath);
         }
         order.document.path = null;
       }

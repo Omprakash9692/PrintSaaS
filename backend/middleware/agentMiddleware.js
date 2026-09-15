@@ -14,7 +14,8 @@ export const protectAgent = async (req, res, next) => {
             });
         }
 
-        const token = authHeader.split(" ")[1];
+        const rawToken = authHeader.split(" ")[1];
+        const token = (rawToken || "").trim().replace(/^["']|["']$/g, "");
 
         const tokenHash = crypto
             .createHash("sha256")

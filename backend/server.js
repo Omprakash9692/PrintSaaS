@@ -12,6 +12,12 @@ import agentRoutes from "./routes/agentRoutes.js";
 
 dotenv.config();
 
+import dns from "dns";
+dns.setServers([
+  '1.1.1.1',
+  '8.8.8.8'
+])
+
 const app = express();
 
 // __dirname equivalent for ES Modules

@@ -30,7 +30,8 @@ const validatePrintOptions = (options) => {
 
 export const getSystemPrinters = async () => {
     try {
-        const pdfToPrinter = await import("pdf-to-printer");
+        const mod = await import("pdf-to-printer");
+        const pdfToPrinter = mod.default || mod;
         const printers = await pdfToPrinter.getPrinters();
         return printers;
     } catch (err) {
@@ -96,7 +97,8 @@ export const printDocument = async (filePath, options) => {
         return true;
     } else {
         console.log("📠 Sending job to Physical System Printer...");
-        const pdfToPrinter = await import("pdf-to-printer");
+        const mod = await import("pdf-to-printer");
+        const pdfToPrinter = mod.default || mod;
 
         const printParams = {
             copies: options.copies,

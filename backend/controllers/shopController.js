@@ -35,10 +35,15 @@ export const getShop = async (req, res) => {
       queryConditions.push({ shopName: shopNameRegex });
     }
 
-    const shop = await User.findOne(
-      { $or: queryConditions },
-      { shopName: 1, shopCode: 1 }
-    );
+    let shop = null;
+    try {
+      shop = await User.findOne(
+        { $or: queryConditions },
+        { shopName: 1, shopCode: 1 }
+      );
+    } catch (dbError) {
+      shop = null;
+    }
 
     if (!shop) {
       return res.status(404).json({ message: "Shop not found" });

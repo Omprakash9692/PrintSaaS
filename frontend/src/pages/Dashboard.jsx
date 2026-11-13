@@ -20,6 +20,7 @@ import {
   X,
   Store,
   ShieldCheck,
+  IndianRupee,
 } from "lucide-react";
 
 const Dashboard = () => {
@@ -249,6 +250,10 @@ const Dashboard = () => {
     (order) => order.status === "PRINT_FAILED",
   ).length;
 
+  const totalRevenue = orders
+    .filter((order) => order.paymentStatus === "PAID")
+    .reduce((sum, order) => sum + (order.pricing?.totalAmount || 0), 0);
+
   const filteredOrders = orders.filter((order) => {
     if (activeTab === "ALL") return true;
     return order.status === activeTab;
@@ -421,11 +426,11 @@ const Dashboard = () => {
 
           <div className="metric-card">
             <div className="metric-info">
-              <p>Total Orders</p>
-              <div className="metric-value">{orders.length}</div>
+              <p>Total Revenue</p>
+              <div className="metric-value">₹{totalRevenue}</div>
             </div>
-            <div className="metric-icon-box total">
-              <LayoutGrid size={22} />
+            <div className="metric-icon-box completed">
+              <IndianRupee size={22} />
             </div>
           </div>
         </div>
@@ -513,7 +518,34 @@ const Dashboard = () => {
                   {/* Order Card Header */}
                   <div className="order-card-header">
                     <span className="order-id-badge">{order.orderId}</span>
-                    <StatusBadge status={order.status} />
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                      <span
+                        style={{
+                          fontSize: "0.75rem",
+                          fontWeight: "700",
+                          padding: "0.2rem 0.5rem",
+                          borderRadius: "var(--radius-sm)",
+                          background:
+                            order.paymentStatus === "PAID"
+                              ? "rgba(16, 185, 129, 0.12)"
+                              : "rgba(239, 68, 68, 0.12)",
+                          color:
+                            order.paymentStatus === "PAID"
+                              ? "#059669"
+                              : "#dc2626",
+                          border: `1px solid ${
+                            order.paymentStatus === "PAID"
+                              ? "rgba(16, 185, 129, 0.3)"
+                              : "rgba(239, 68, 68, 0.3)"
+                          }`,
+                        }}
+                      >
+                        {order.paymentStatus === "PAID"
+                          ? `₹${order.pricing?.totalAmount || 0} PAID`
+                          : "UNPAID"}
+                      </span>
+                      <StatusBadge status={order.status} />
+                    </div>
                   </div>
 
                   {/* Document Name */}
@@ -587,9 +619,10 @@ const Dashboard = () => {
                       className="btn-primary"
                       style={{ fontSize: "0.875rem", padding: "0.5rem 1rem" }}
                       onClick={() => updateStatus(order.orderId, "PRINTING")}
+                      disabled={order.paymentStatus !== "PAID"}
                     >
                       <Play size={15} />
-                      Start Printing
+                      {order.paymentStatus === "PAID" ? "Start Printing" : "Payment Pending"}
                     </button>
                   )}
 

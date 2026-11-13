@@ -13,9 +13,13 @@ import {
   Copy,
   Check,
   Store,
-  Sparkles,
   Printer,
   FileCheck,
+  CreditCard,
+  ShieldCheck,
+  IndianRupee,
+  RefreshCw,
+  ArrowLeft,
 } from "lucide-react";
 
 const CustomerShop = () => {
@@ -23,6 +27,7 @@ const CustomerShop = () => {
   const navigate = useNavigate();
   const [shop, setShop] = useState(null);
   const [order, setOrder] = useState(null);
+  const [pendingPayment, setPendingPayment] = useState(null);
   const [file, setFile] = useState(null);
   const [copies, setCopies] = useState(1);
   const [colorMode, setColorMode] = useState("B/W");
@@ -30,6 +35,7 @@ const CustomerShop = () => {
   const [paperSize, setPaperSize] = useState("A4");
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [error, setError] = useState("");
   const [copiedId, setCopiedId] = useState(false);
 
@@ -58,11 +64,25 @@ const CustomerShop = () => {
     fetchShop();
   }, [shopCode, navigate]);
 
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!file) {
-      alert("Please select a PDF");
+      alert("Please select a PDF document");
       return;
     }
 
@@ -84,14 +104,102 @@ const CustomerShop = () => {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || "Failed to place order");
+        throw new Error(data.message || "Failed to create order");
       }
 
-      setOrder(data.order);
+      setPendingPayment({
+        order: data.order,
+        payment: data.payment,
+      });
     } catch (err) {
       alert(err.message);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleVerifyPayment = async (paymentData) => {
+    try {
+      setIsVerifying(true);
+      const targetOrderId = pendingPayment.order.orderId;
+      const response = await fetch(`${API_URL}/orders/${targetOrderId}/verify-payment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(paymentData),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Payment verification failed");
+      }
+
+      setOrder(data.order);
+      setPendingPayment(null);
+    } catch (err) {
+      alert("Verification Error: " + err.message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleRazorpayPayment = async () => {
+    if (!pendingPayment || !pendingPayment.payment) return;
+
+    const { payment, order: currentOrder } = pendingPayment;
+
+    // If mock/sandbox mode is requested or keys are not provided
+    if (payment.isMock) {
+      await handleVerifyPayment({
+        isMock: true,
+        razorpay_order_id: payment.razorpayOrderId,
+        razorpay_payment_id: `mock_pay_${Date.now()}`,
+      });
+      return;
+    }
+
+    const scriptLoaded = await loadRazorpayScript();
+    if (!scriptLoaded) {
+      alert("Could not load payment gateway SDK. Please check your internet connection.");
+      return;
+    }
+
+    const options = {
+      key: payment.keyId,
+      amount: payment.amountPaise,
+      currency: payment.currency || "INR",
+      name: shop?.shopName || "PrintSaaS",
+      description: `Print Order ${currentOrder.orderId}`,
+      order_id: payment.razorpayOrderId,
+      handler: async function (response) {
+        await handleVerifyPayment({
+          razorpay_order_id: response.razorpay_order_id,
+          razorpay_payment_id: response.razorpay_payment_id,
+          razorpay_signature: response.razorpay_signature,
+          isMock: false,
+        });
+      },
+      prefill: {
+        name: "Customer",
+        email: "",
+        contact: "",
+      },
+      theme: {
+        color: "#2563eb",
+      },
+    };
+
+    try {
+      const razorpayInstance = new window.Razorpay(options);
+      razorpayInstance.on("payment.failed", function (response) {
+        alert("Payment failed: " + (response.error?.description || "Unknown error"));
+      });
+      razorpayInstance.open();
+    } catch (rzpErr) {
+      console.error(rzpErr);
+      alert("Failed to open payment gateway: " + rzpErr.message);
     }
   };
 
@@ -147,7 +255,166 @@ const CustomerShop = () => {
     );
   }
 
-  // Order Confirmation State
+  // State 1: Payment Checkout Screen (Before Print Starts)
+  if (pendingPayment) {
+    const { order: pendingOrder, payment } = pendingPayment;
+    const pages = pendingOrder.pricing?.pages || 1;
+    const rate = pendingOrder.pricing?.ratePerPage || 2;
+    const totalAmount = pendingOrder.pricing?.totalAmount || payment.amount;
+
+    return (
+      <div className="app-container">
+        <Navbar />
+        <main className="main-content">
+          <div className="confirmation-container" style={{ maxWidth: "520px" }}>
+            <div className="saas-card" style={{ padding: "2.25rem 2rem" }}>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: "1.25rem" }}>
+                <div
+                  style={{
+                    width: "60px",
+                    height: "60px",
+                    borderRadius: "50%",
+                    backgroundColor: "rgba(37, 99, 235, 0.1)",
+                    color: "var(--primary)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <CreditCard size={32} />
+                </div>
+              </div>
+
+              <h1 style={{ fontSize: "1.65rem", marginBottom: "0.35rem", textAlign: "center" }}>
+                Complete Payment
+              </h1>
+              <p style={{ color: "var(--text-secondary)", fontSize: "0.925rem", textAlign: "center", marginBottom: "1.75rem" }}>
+                Payment is required before your document is printed at <strong>{shop?.shopName}</strong>.
+              </p>
+
+              {/* Order & Price Summary Card */}
+              <div
+                style={{
+                  background: "var(--bg-secondary)",
+                  borderRadius: "var(--radius-md)",
+                  padding: "1.25rem",
+                  marginBottom: "1.75rem",
+                  border: "1px solid var(--border-color)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.75rem", fontSize: "0.9rem" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>Document:</span>
+                  <span style={{ fontWeight: "600", color: "var(--text-main)", maxWidth: "220px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                    {pendingOrder.filename}
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.75rem", fontSize: "0.9rem" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>Detected Pages:</span>
+                  <span style={{ fontWeight: "600", color: "var(--text-main)" }}>
+                    {pages} {pages === 1 ? "page" : "pages"}
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.75rem", fontSize: "0.9rem" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>Print Options:</span>
+                  <span style={{ fontWeight: "600", color: "var(--text-main)" }}>
+                    {pendingOrder.copies} {pendingOrder.copies === 1 ? "copy" : "copies"} • {pendingOrder.colorMode} • {pendingOrder.paperSize}
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.75rem", fontSize: "0.9rem" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>Rate per page:</span>
+                  <span style={{ fontWeight: "600", color: "var(--text-main)" }}>
+                    ₹{rate} / page
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    borderTop: "1px dashed var(--border-color)",
+                    paddingTop: "0.75rem",
+                    marginTop: "0.75rem",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span style={{ fontWeight: "700", fontSize: "1.05rem", color: "var(--text-main)" }}>
+                    Total Amount:
+                  </span>
+                  <span style={{ fontWeight: "800", fontSize: "1.4rem", color: "var(--primary)" }}>
+                    ₹{totalAmount}
+                  </span>
+                </div>
+              </div>
+
+              {/* Payment Buttons */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem", marginBottom: "1.25rem" }}>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleRazorpayPayment}
+                  disabled={isVerifying}
+                  style={{ width: "100%", justifyContent: "center", fontSize: "1.05rem", padding: "0.85rem" }}
+                >
+                  {isVerifying ? (
+                    <>
+                      <RefreshCw size={18} className="spin-icon" />
+                      Verifying Payment...
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck size={20} />
+                      Pay ₹{totalAmount} & Start Printing
+                    </>
+                  )}
+                </button>
+
+                {/* Demo / Sandbox Payment Button for easy testing without keys */}
+                {payment.isMock && (
+                  <div style={{ textAlign: "center", marginTop: "0.25rem" }}>
+                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", display: "block", marginBottom: "0.5rem" }}>
+                      💡 Razorpay test keys not configured yet. You can test with simulated instant payment:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleVerifyPayment({ isMock: true, razorpay_order_id: payment.razorpayOrderId })}
+                      className="btn-secondary"
+                      disabled={isVerifying}
+                      style={{ fontSize: "0.85rem", padding: "0.5rem 1rem", width: "100%", justifyContent: "center" }}
+                    >
+                      Instant Test Payment (Mock ₹{totalAmount})
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setPendingPayment(null)}
+                  className="btn-secondary"
+                  disabled={isVerifying}
+                  style={{ width: "100%", justifyContent: "center", fontSize: "0.9rem" }}
+                >
+                  <ArrowLeft size={16} />
+                  Change Print Options
+                </button>
+              </div>
+
+              <div className="privacy-notice" style={{ textAlign: "left", marginTop: "1rem" }}>
+                <Lock size={16} style={{ flexShrink: 0, marginTop: "2px" }} />
+                <span>
+                  <strong>Safe & Direct:</strong> Document will only be sent to the physical printer after payment is confirmed.
+                </span>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // State 2: Order Placed & Payment Confirmed
   if (order) {
     return (
       <div className="app-container">
@@ -159,9 +426,9 @@ const CustomerShop = () => {
                 <CheckCircle2 size={44} />
               </div>
 
-              <h1 style={{ fontSize: "1.875rem", marginBottom: "0.375rem" }}>Order Placed</h1>
+              <h1 style={{ fontSize: "1.875rem", marginBottom: "0.375rem" }}>Payment Successful!</h1>
               <p style={{ color: "var(--text-secondary)", fontSize: "0.975rem" }}>
-                Your document has been sent securely to <strong>{shop?.shopName || "the print shop"}</strong>.
+                Your payment of <strong>₹{order.pricing?.totalAmount || 0}</strong> was verified. Your document is now queued for printing at <strong>{shop?.shopName || "the print shop"}</strong>.
               </p>
 
               <div style={{ margin: "1.75rem 0" }}>
@@ -190,13 +457,16 @@ const CustomerShop = () => {
               </div>
 
               <p style={{ color: "var(--text-main)", fontWeight: "600", fontSize: "0.95rem", marginBottom: "1.5rem" }}>
-                Please show this Order ID at the counter to collect your print.
+                Please show this Order ID at the counter to collect your prints.
               </p>
 
               <button
                 type="button"
                 className="btn-primary"
-                onClick={() => setOrder(null)}
+                onClick={() => {
+                  setOrder(null);
+                  setFile(null);
+                }}
               >
                 <Plus size={18} />
                 Place Another Order
@@ -215,7 +485,7 @@ const CustomerShop = () => {
     );
   }
 
-  // Upload Form Page
+  // State 3: Upload Form Page
   return (
     <div className="app-container">
       <Navbar />
@@ -348,7 +618,7 @@ const CustomerShop = () => {
                     <span style={{ marginRight: "0.5rem", fontWeight: "800" }}>
                       {colorMode === "B/W" ? "●" : "○"}
                     </span>
-                    Black & White
+                    Black & White (₹2 / page)
                   </label>
                   <label className={`pill-option ${colorMode === "COLOR" ? "active" : ""}`}>
                     <input
@@ -361,7 +631,7 @@ const CustomerShop = () => {
                     <span style={{ marginRight: "0.5rem", fontWeight: "800" }}>
                       {colorMode === "COLOR" ? "●" : "○"}
                     </span>
-                    Full Color
+                    Full Color (₹10 / page)
                   </label>
                 </div>
               </div>
@@ -440,11 +710,14 @@ const CustomerShop = () => {
               disabled={isSubmitting}
             >
               {isSubmitting ? (
-                <>Processing Order...</>
+                <>
+                  <RefreshCw size={18} className="spin-icon" />
+                  Calculating cost & preparing payment...
+                </>
               ) : (
                 <>
-                  <Printer size={20} />
-                  Place Print Order
+                  <CreditCard size={20} />
+                  Proceed to Payment
                 </>
               )}
             </button>
@@ -453,7 +726,7 @@ const CustomerShop = () => {
             <div className="privacy-notice">
               <Lock size={18} style={{ flexShrink: 0, marginTop: "2px" }} />
               <div>
-                <strong>Privacy note:</strong> Your document is temporarily stored for printing and is deleted after the print workflow.
+                <strong>Pay before print:</strong> Once paid, your print job will be safely sent to the counter printer and your document automatically removed after printing.
               </div>
             </div>
           </form>

@@ -4,6 +4,12 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { uploadToImageKit, isImageKitConfigured } from "../config/imagekit.js";
+import { PDFDocument } from "pdf-lib";
+import {
+  getRazorpayInstance,
+  isRazorpayConfigured,
+  getRazorpayKeyId,
+} from "../config/razorpay.js";
 
 export const createOrder = async (req, res) => {
   try {
@@ -65,6 +71,37 @@ export const createOrder = async (req, res) => {
       });
     }
 
+    // Determine actual PDF page count
+    let pageCount = 1;
+    if (req.file.buffer) {
+      try {
+        const pdfDoc = await PDFDocument.load(req.file.buffer, {
+          ignoreEncryption: true,
+        });
+        pageCount = pdfDoc.getPageCount() || 1;
+      } catch (pdfErr) {
+        console.warn("⚠️ Could not count PDF pages, defaulting to 1:", pdfErr.message);
+        pageCount = 1;
+      }
+    }
+
+    // Calculate Pricing
+    // Standard rates:
+    // B/W A4: ₹2 / page | B/W A3: ₹5 / page
+    // COLOR A4: ₹10 / page | COLOR A3: ₹20 / page
+    const isColor = (colorMode || "B/W").toUpperCase() === "COLOR";
+    const isA3 = (paperSize || "A4").toUpperCase() === "A3";
+
+    let ratePerPage = 2;
+    if (isColor) {
+      ratePerPage = isA3 ? 20 : 10;
+    } else {
+      ratePerPage = isA3 ? 5 : 2;
+    }
+
+    const totalPagesToPrint = pageCount * numberOfCopies;
+    const totalAmount = totalPagesToPrint * ratePerPage;
+
     // Handle File Storage (ImageKit attempt with automatic Local Disk Fallback)
     let imagekitResult = null;
     let localFilePath = req.file.path || null;
@@ -99,7 +136,32 @@ export const createOrder = async (req, res) => {
     const orderId =
       "ORD-" + crypto.randomBytes(3).toString("hex").toUpperCase();
 
-    //create order
+    // Create Razorpay Order if configured, otherwise provide mock order for dev/testing
+    let razorpayOrderId = null;
+    const configured = isRazorpayConfigured();
+
+    if (configured) {
+      try {
+        const rzp = getRazorpayInstance();
+        const rzpOrder = await rzp.orders.create({
+          amount: Math.round(totalAmount * 100), // in paise (1 INR = 100 paise)
+          currency: "INR",
+          receipt: orderId,
+          notes: {
+            orderId,
+            shopCode: shop.shopCode,
+          },
+        });
+        razorpayOrderId = rzpOrder.id;
+      } catch (rzpErr) {
+        console.warn("⚠️ Razorpay order creation failed. Falling back to mock order:", rzpErr.message);
+        razorpayOrderId = `order_mock_${Date.now()}`;
+      }
+    } else {
+      razorpayOrderId = `order_mock_${Date.now()}`;
+    }
+
+    // Create order with PAYMENT_PENDING status - DO NOT print until payment is verified!
     const order = await Order.create({
       orderId,
       shopCode: shop.shopCode,
@@ -115,10 +177,22 @@ export const createOrder = async (req, res) => {
       colorMode: colorMode || "B/W",
       sides: sides || "SINGLE",
       paperSize: paperSize || "A4",
+      status: "PAYMENT_PENDING",
+      paymentStatus: "UNPAID",
+      pricing: {
+        pages: pageCount,
+        ratePerPage,
+        totalAmount,
+        currency: "INR",
+      },
+      paymentDetails: {
+        razorpayOrderId,
+        paidAt: null,
+      },
     });
 
     res.status(201).json({
-      message: "Print order created successfully",
+      message: "Order created. Please complete payment to proceed with printing.",
       order: {
         orderId: order.orderId,
         shopCode: order.shopCode,
@@ -128,13 +202,100 @@ export const createOrder = async (req, res) => {
         sides: order.sides,
         paperSize: order.paperSize,
         status: order.status,
+        paymentStatus: order.paymentStatus,
+        pricing: order.pricing,
+        createdAt: order.createdAt,
+      },
+      payment: {
+        razorpayOrderId,
+        amount: totalAmount,
+        amountPaise: Math.round(totalAmount * 100),
+        currency: "INR",
+        keyId: getRazorpayKeyId(),
+        isMock: !configured || razorpayOrderId.startsWith("order_mock_"),
+      },
+    });
+  } catch (error) {
+    console.error("Error creating order:", error);
+    res.status(500).json({
+      message: "Failed to create order",
+    });
+  }
+};
+
+export const verifyPayment = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      isMock,
+    } = req.body;
+
+    const order = await Order.findOne({ orderId });
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    if (order.paymentStatus === "PAID") {
+      return res.status(200).json({
+        message: "Order already paid",
+        order: {
+          orderId: order.orderId,
+          status: order.status,
+          paymentStatus: order.paymentStatus,
+          pricing: order.pricing,
+        },
+      });
+    }
+
+    // Verify cryptographic signature if real Razorpay is configured and not mock
+    if (isRazorpayConfigured() && !isMock) {
+      const secret = process.env.RAZORPAY_KEY_SECRET.trim();
+      const body = `${razorpay_order_id}|${razorpay_payment_id}`;
+      const expectedSignature = crypto
+        .createHmac("sha256", secret)
+        .update(body)
+        .digest("hex");
+
+      if (expectedSignature !== razorpay_signature) {
+        order.paymentStatus = "FAILED";
+        await order.save();
+        return res.status(400).json({ message: "Payment verification signature mismatch" });
+      }
+    }
+
+    // Mark as PAID and transition to PENDING (Only now can the print agent pick it up!)
+    order.paymentStatus = "PAID";
+    order.status = "PENDING";
+    order.paymentDetails = {
+      razorpayOrderId: razorpay_order_id || order.paymentDetails?.razorpayOrderId,
+      razorpayPaymentId: razorpay_payment_id || `pay_mock_${Date.now()}`,
+      paidAt: new Date(),
+    };
+
+    await order.save();
+
+    console.log(`💰 Order ${order.orderId} PAID successfully (₹${order.pricing?.totalAmount}). Queued for print.`);
+
+    res.status(200).json({
+      message: "Payment verified successfully. Order queued for printing.",
+      order: {
+        orderId: order.orderId,
+        shopCode: order.shopCode,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        pricing: order.pricing,
+        paymentDetails: order.paymentDetails,
         createdAt: order.createdAt,
       },
     });
   } catch (error) {
-    console.error(error);
+    console.error("Payment verification error:", error);
     res.status(500).json({
-      message: "Failed to create order",
+      message: "Failed to verify payment",
     });
   }
 };
@@ -153,6 +314,9 @@ export const getShopOrders = async (req, res) => {
         sides: 1,
         paperSize: 1,
         status: 1,
+        paymentStatus: 1,
+        pricing: 1,
+        paymentDetails: 1,
         completedAt: 1,
         createdAt: 1,
       },
@@ -177,6 +341,7 @@ export const updateOrderStatus = async (req, res) => {
     const { status } = req.body;
 
     const allowedStatuses = [
+      "PAYMENT_PENDING",
       "PENDING",
       "PRINTING",
       "COMPLETED",
@@ -202,6 +367,7 @@ export const updateOrderStatus = async (req, res) => {
     }
 
     const validTransitions = {
+      PAYMENT_PENDING: ["PENDING", "CANCELLED"],
       PENDING: ["PRINTING", "CANCELLED", "PRINT_FAILED"],
       PRINTING: ["COMPLETED", "PRINT_FAILED", "PENDING"],
       PRINT_FAILED: ["PENDING", "PRINTING", "CANCELLED"],
@@ -236,6 +402,7 @@ export const updateOrderStatus = async (req, res) => {
       order: {
         orderId: order.orderId,
         status: order.status,
+        paymentStatus: order.paymentStatus,
         completedAt: order.completedAt,
       },
     });
@@ -260,6 +427,12 @@ export const getOrderForPrint = async (req, res) => {
     if (!order) {
       return res.status(404).json({
         message: "Order not found",
+      });
+    }
+
+    if (order.paymentStatus !== "PAID") {
+      return res.status(403).json({
+        message: "Cannot print unpaid document. Customer must complete payment first.",
       });
     }
 

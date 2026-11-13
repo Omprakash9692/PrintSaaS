@@ -66,17 +66,19 @@ export const getAgentJobs = async (req,res)=>{
         const shopCode = req.agent.shopCode;
         const jobs = await Order.find({
             shopCode,
-            status:"PENDING"
+            status: "PENDING",
+            paymentStatus: "PAID" // CRITICAL SAFETY: Only print if customer has paid!
         },
     {
         orderId: 1,
-        "document.filename":1,
+        "document.filename": 1,
         "document.size": 1,
         copies: 1,
         colorMode: 1,
         sides: 1,
         paperSize: 1,
         status: 1,
+        paymentStatus: 1,
         createdAt: 1
     }).sort({createdAt:1});
 
@@ -104,6 +106,12 @@ export const getAgentJobDocument = async (req, res) => {
         if (!order) {
             return res.status(404).json({
                 message: "Order not found"
+            });
+        }
+
+        if (order.paymentStatus !== "PAID") {
+            return res.status(403).json({
+                message: "Payment required before printing document"
             });
         }
 

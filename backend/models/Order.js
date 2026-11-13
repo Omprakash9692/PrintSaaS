@@ -73,13 +73,55 @@ const orderSchema = new mongoose.Schema(
         status: {
             type: String,
             enum: [
+                "PAYMENT_PENDING",
                 "PENDING",
                 "PRINTING",
                 "COMPLETED",
                 "CANCELLED",
                 "PRINT_FAILED"
             ],
-            default: "PENDING"
+            default: "PAYMENT_PENDING"
+        },
+
+        paymentStatus: {
+            type: String,
+            enum: ["UNPAID", "PAID", "FAILED"],
+            default: "UNPAID",
+            index: true
+        },
+
+        pricing: {
+            pages: {
+                type: Number,
+                default: 1
+            },
+            ratePerPage: {
+                type: Number,
+                default: 2
+            },
+            totalAmount: {
+                type: Number,
+                default: 0
+            },
+            currency: {
+                type: String,
+                default: "INR"
+            }
+        },
+
+        paymentDetails: {
+            razorpayOrderId: {
+                type: String,
+                default: null
+            },
+            razorpayPaymentId: {
+                type: String,
+                default: null
+            },
+            paidAt: {
+                type: Date,
+                default: null
+            }
         },
 
         completedAt: {

@@ -5,6 +5,13 @@ const StatusBadge = ({ status }) => {
   const normalizedStatus = (status || "PENDING").toUpperCase();
 
   switch (normalizedStatus) {
+    case "PAYMENT_PENDING":
+      return (
+        <span className="badge" style={{ background: "rgba(245, 158, 11, 0.15)", color: "#d97706", border: "1px solid rgba(245, 158, 11, 0.3)" }}>
+          <Clock size={13} />
+          Payment Pending
+        </span>
+      );
     case "PENDING":
       return (
         <span className="badge badge-pending">
